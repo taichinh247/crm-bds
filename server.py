@@ -31,13 +31,22 @@ def run_job(jid, path):
                 dbg.write("job %s text_len=%s\n" % (jid, len(text)))
         except OSError:
             pass
-        ai = ai_analyze(text)
-        err = ai.get("error")
-        if err:
-            ai = rule_analyze(text)
-            ai["ai_error"] = err
+        # kết quả nhanh (rule) → app hiện ngay; AI chạy nền rồi cập nhật
+        fast = rule_analyze(text)
+        fast["ai_status"] = "pending"
         with JOBS_LOCK:
-            JOBS[jid] = {"ok": True, "status": "done", "text": text, "analysis": ai, "model": MODEL}
+            JOBS[jid] = {"ok": True, "status": "done", "text": text, "analysis": fast, "model": MODEL}
+        ai = ai_analyze(text)
+        with JOBS_LOCK:
+            if jid not in JOBS:
+                return
+            if ai.get("error"):
+                JOBS[jid]["ai_status"] = "failed"
+                JOBS[jid]["ai_error"] = ai.get("error")
+            else:
+                ai["ai_status"] = "done"
+                JOBS[jid]["analysis"] = ai
+                JOBS[jid]["ai_status"] = "done"
     except Exception as e:
         with JOBS_LOCK:
             JOBS[jid] = {"ok": False, "status": "error", "error": str(e)}

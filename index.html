@@ -484,15 +484,24 @@ async function uploadAudio(f){
 }
 async function pollJob(jid, statusUrl, box){
   const t0 = Date.now();
-  for(let i=0;i<90;i++){
+  for(let i=0;i<160;i++){
     await new Promise(r=> setTimeout(r, 4000));
     try{
       const r = await fetch(statusUrl + jid);
       const d = await r.json();
-      if(d.status === "done"){ ui.pendingRec = d; showRec(d); return; }
       if(d.status === "error"){ box.innerHTML = '<div class="recbox err">Lỗi phân tích: '+esc(d.error||"")+'</div>'; return; }
+      if(d.status === "done"){
+        ui.pendingRec = d;
+        showRec(d);
+        if(d.ai_status === "pending"){
+          const t = box.querySelector(".rectitle");
+          if(t) t.innerHTML = '📝 Bản chép <span class="tag">AI đang chạy...</span>';
+          continue;
+        }
+        return;
+      }
       const s = Math.round((Date.now()-t0)/1000);
-      box.innerHTML = '<div class="recbox"><div class="rectitle">⏳ Đang phân tích...</div><div class="hint">Nhận diện giọng nói rồi AI tổng hợp. Đã chạy '+s+'s.</div></div>';
+      box.innerHTML = '<div class="recbox"><div class="rectitle">⏳ Đang nhận diện giọng nói...</div><div class="hint">Đã chạy '+s+'s. Máy yếu có thể mất lâu.</div></div>';
     }catch(e){}
   }
   box.innerHTML = '<div class="recbox err">Hết giờ chờ. Thử lại hoặc mở app trên máy tính.</div>';
