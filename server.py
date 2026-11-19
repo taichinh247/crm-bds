@@ -10,6 +10,7 @@ os.makedirs(UPLOAD, exist_ok=True)
 MODEL = os.environ.get("CRM_WHISPER_MODEL", "small")
 HERMES = os.environ.get("CRM_HERMES_CMD") or shutil.which("hermes") or \
          r"D:\Hermes\hermes-agent\apps\desktop\release\win-unpacked\resources\agent-payload\bin\hermes.exe"
+AI_MODEL = os.environ.get("CRM_HERMES_MODEL", "glm-5.3-flash")
 
 app = Flask(__name__, static_folder=BASE, static_url_path="")
 app.config["MAX_CONTENT_LENGTH"] = 200 * 1024 * 1024
@@ -108,22 +109,34 @@ Bản chép: %s"""
 
 def ai_analyze(text):
     prompt = PROMPT % text
-    t = time.time()
-    try:
-        r = subprocess.run([HERMES, "-z", prompt], capture_output=True, text=True,
-                           timeout=300, encoding="utf-8", errors="replace")
-        out = (r.stdout or "") + (r.stderr or "")
+    last = None
+    for attempt in range(3):
+        t = time.time()
         try:
-            with open(os.path.join(BASE, "ai_debug.log"), "a", encoding="utf-8") as dbg:
-                dbg.write("---- rc=%s dt=%.1f\n%s\n" % (r.returncode, time.time()-t, out[:1200]))
-        except OSError:
-            pass
-        m = re.search(r"\{.*\}", out, re.S)
-        if m:
-            return json.loads(m.group(0))
-        return {"error": "khong doc duoc JSON", "raw": out[-800:]}
-    except Exception as e:
-        return {"error": str(e)}
+            cmd = [HERMES]
+            if AI_MODEL:
+                cmd += ["-m", AI_MODEL]
+            cmd += ["-z", prompt]
+            r = subprocess.run(cmd, capture_output=True, text=True,
+                               timeout=300, encoding="utf-8", errors="replace")
+            out = (r.stdout or "") + (r.stderr or "")
+            try:
+                with open(os.path.join(BASE, "ai_debug.log"), "a", encoding="utf-8") as dbg:
+                    dbg.write("---- try=%s rc=%s dt=%.1f prompt_len=%s prompt_tail=%r\n%s\n"
+                              % (attempt, r.returncode, time.time() - t, len(prompt), prompt[-160:], out[:900]))
+            except OSError:
+                pass
+            m = re.search(r"\{.*\}", out, re.S)
+            if m:
+                try:
+                    return json.loads(m.group(0))
+                except Exception as e:
+                    last = {"error": "json: " + str(e), "raw": out[-500:]}
+            else:
+                last = {"error": "khong doc duoc JSON", "raw": out[-500:]}
+        except Exception as e:
+            last = {"error": str(e)}
+    return last or {"error": "unknown"}
 
 
 def rule_analyze(text):
