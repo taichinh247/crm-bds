@@ -120,7 +120,7 @@ Bản chép: %s"""
 def ai_analyze(text):
     prompt = PROMPT % text
     last = None
-    for attempt in range(3):
+    for attempt in range(2):
         t = time.time()
         try:
             cmd = [HERMES]
@@ -128,7 +128,7 @@ def ai_analyze(text):
                 cmd += ["-m", AI_MODEL]
             cmd += ["-z", prompt]
             r = subprocess.run(cmd, capture_output=True, text=True,
-                               timeout=300, encoding="utf-8", errors="replace")
+                               timeout=180, encoding="utf-8", errors="replace")
             out = (r.stdout or "") + (r.stderr or "")
             try:
                 with open(os.path.join(BASE, "ai_debug.log"), "a", encoding="utf-8") as dbg:
