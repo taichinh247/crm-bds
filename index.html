@@ -460,13 +460,30 @@ async function uploadAudio(f){
   const fd = new FormData(); fd.append("audio", f, f.name);
   const base = (db.settings.aiBase || ui.aiBase || "").replace(/\/+$/, "");
   const url = base ? base + "/api/transcribe" : "api/transcribe";
+  const statusUrl = base ? base + "/api/transcribe/" : "api/transcribe/";
   try{
     const r = await fetch(url, {method:"POST", body:fd});
     const d = await r.json();
     if(!d.ok && d.error){ box.innerHTML = '<div class="recbox err">Lỗi phân tích: '+esc(d.error)+'</div>'; return; }
-    ui.pendingRec = d;
-    showRec(d);
+    const jid = d.job;
+    if(!jid){ ui.pendingRec = d; showRec(d); return; }
+    await pollJob(jid, statusUrl, box);
   }catch(err){ box.innerHTML = '<div class="recbox err">Không gửi được file: '+esc(err.message)+'</div>'; }
+}
+async function pollJob(jid, statusUrl, box){
+  const t0 = Date.now();
+  for(let i=0;i<90;i++){
+    await new Promise(r=> setTimeout(r, 4000));
+    try{
+      const r = await fetch(statusUrl + jid);
+      const d = await r.json();
+      if(d.status === "done"){ ui.pendingRec = d; showRec(d); return; }
+      if(d.status === "error"){ box.innerHTML = '<div class="recbox err">Lỗi phân tích: '+esc(d.error||"")+'</div>'; return; }
+      const s = Math.round((Date.now()-t0)/1000);
+      box.innerHTML = '<div class="recbox"><div class="rectitle">⏳ Đang phân tích...</div><div class="hint">Nhận diện giọng nói rồi AI tổng hợp. Đã chạy '+s+'s.</div></div>';
+    }catch(e){}
+  }
+  box.innerHTML = '<div class="recbox err">Hết giờ chờ. Thử lại hoặc mở app trên máy tính.</div>';
 }
 function showRec(d){
   const a = d.analysis || {};

@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 """CRM BĐS backend: serve PWA + /api/transcribe (STT tiếng Việt + AI tổng hợp)."""
-import os, re, json, subprocess, threading, time
+import os, re, json, subprocess, threading, time, shutil, random
 from flask import Flask, request, jsonify, send_from_directory
 
 BASE = os.path.dirname(os.path.abspath(__file__))
@@ -8,13 +8,43 @@ UPLOAD = os.path.join(os.environ.get("HERMES_HOME", r"D:\Hermes"), "cache", "scr
 os.makedirs(UPLOAD, exist_ok=True)
 
 MODEL = os.environ.get("CRM_WHISPER_MODEL", "small")
-HERMES = os.environ.get("CRM_HERMES_CMD", "hermes")
+HERMES = os.environ.get("CRM_HERMES_CMD") or shutil.which("hermes") or \
+         r"D:\Hermes\hermes-agent\apps\desktop\release\win-unpacked\resources\agent-payload\bin\hermes.exe"
 
 app = Flask(__name__, static_folder=BASE, static_url_path="")
 app.config["MAX_CONTENT_LENGTH"] = 200 * 1024 * 1024
 
 _model = None
 _lock = threading.Lock()
+JOBS = {}
+JOBS_LOCK = threading.Lock()
+_STT_LOCK = threading.Lock()
+
+
+def run_job(jid, path):
+    try:
+        with _STT_LOCK:
+            text = stt(path)
+        try:
+            with open(os.path.join(BASE, "job_debug.log"), "a", encoding="utf-8") as dbg:
+                dbg.write("job %s text_len=%s\n" % (jid, len(text)))
+        except OSError:
+            pass
+        ai = ai_analyze(text)
+        err = ai.get("error")
+        if err:
+            ai = rule_analyze(text)
+            ai["ai_error"] = err
+        with JOBS_LOCK:
+            JOBS[jid] = {"ok": True, "status": "done", "text": text, "analysis": ai, "model": MODEL}
+    except Exception as e:
+        with JOBS_LOCK:
+            JOBS[jid] = {"ok": False, "status": "error", "error": str(e)}
+    finally:
+        try:
+            os.remove(path)
+        except OSError:
+            pass
 
 
 def get_model():
@@ -45,9 +75,19 @@ def decode_wav(path):
 
 
 def stt(path):
+    def lg(m):
+        try:
+            with open(os.path.join(BASE, "job_debug.log"), "a", encoding="utf-8") as dbg:
+                dbg.write(m + "\n")
+        except OSError:
+            pass
+    lg("stt begin %s" % path)
     audio = decode_wav(path)
-    segments, info = get_model().transcribe(audio, language="vi", beam_size=1)
-    return "".join(s.text for s in segments).strip()
+    lg("stt decoded %s" % (audio.shape,))
+    segs, info = get_model().transcribe(audio, language="vi", beam_size=1)
+    out = "".join(s.text for s in segs).strip()
+    lg("stt done len=%s" % len(out))
+    return out
 
 
 PROMPT = """Bạn là trợ lý CRM bất động sản. Phân tích bản chép cuộc gọi sau và trả về CHÍNH XÁC một object JSON (không markdown, không giải thích) với các khóa:
@@ -68,10 +108,16 @@ Bản chép: %s"""
 
 def ai_analyze(text):
     prompt = PROMPT % text
+    t = time.time()
     try:
         r = subprocess.run([HERMES, "-z", prompt], capture_output=True, text=True,
                            timeout=300, encoding="utf-8", errors="replace")
         out = (r.stdout or "") + (r.stderr or "")
+        try:
+            with open(os.path.join(BASE, "ai_debug.log"), "a", encoding="utf-8") as dbg:
+                dbg.write("---- rc=%s dt=%.1f\n%s\n" % (r.returncode, time.time()-t, out[:1200]))
+        except OSError:
+            pass
         m = re.search(r"\{.*\}", out, re.S)
         if m:
             return json.loads(m.group(0))
@@ -136,22 +182,31 @@ def transcribe():
     if not f:
         return jsonify({"error": "khong co file"}), 400
     ext = os.path.splitext(f.filename or "")[1].lower() or ".mp3"
-    path = os.path.join(UPLOAD, str(int(time.time() * 1000)) + ext)
+    jid = str(int(time.time() * 1000)) + str(random.randint(100, 999))
+    path = os.path.join(UPLOAD, jid + ext)
     f.save(path)
     try:
-        text = stt(path)
-        ai = ai_analyze(text)
-        if ai.get("error"):
-            ai = rule_analyze(text)
-            ai["ai_error"] = ai.get("error")
-        return jsonify({"ok": True, "text": text, "analysis": ai, "model": MODEL})
-    except Exception as e:
-        return jsonify({"ok": False, "error": str(e)}), 500
-    finally:
-        try:
-            os.remove(path)
-        except OSError:
-            pass
+        sz = os.path.getsize(path)
+    except OSError:
+        sz = -1
+    try:
+        with open(os.path.join(BASE, "job_debug.log"), "a", encoding="utf-8") as dbg:
+            dbg.write("job %s name=%s size=%s\n" % (jid, f.filename, sz))
+    except OSError:
+        pass
+    with JOBS_LOCK:
+        JOBS[jid] = {"ok": True, "status": "running"}
+    threading.Thread(target=run_job, args=(jid, path), daemon=True).start()
+    return jsonify({"ok": True, "job": jid})
+
+
+@app.route("/api/transcribe/<jid>")
+def transcribe_status(jid):
+    with JOBS_LOCK:
+        j = JOBS.get(jid)
+    if not j:
+        return jsonify({"ok": False, "error": "khong thay job"}), 404
+    return jsonify(j)
 
 
 if __name__ == "__main__":
