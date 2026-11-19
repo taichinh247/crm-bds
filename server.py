@@ -35,7 +35,8 @@ def run_job(jid, path):
         fast = rule_analyze(text)
         fast["ai_status"] = "pending"
         with JOBS_LOCK:
-            JOBS[jid] = {"ok": True, "status": "done", "text": text, "analysis": fast, "model": MODEL}
+            JOBS[jid] = {"ok": True, "status": "done", "text": text, "analysis": fast, "model": MODEL,
+                         "ai_status": "pending"}
         ai = ai_analyze(text)
         with JOBS_LOCK:
             if jid not in JOBS:
