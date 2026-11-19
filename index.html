@@ -186,7 +186,7 @@ const SOURCES = ["Zalo","Facebook","Người quen","Đại lý","Hotline","Khác
 const NEEDS = ["Mua","Thuê"];
 
 let db = load();
-let ui = { tab:"khach", q:"", status:"all", editing:null };
+let ui = { tab:"khach", q:"", status:"all", editing:null, aiBase:"" };
 
 function load(){
   try{
@@ -458,7 +458,7 @@ async function uploadAudio(f){
   const box = document.getElementById("recResult");
   box.innerHTML = '<div class="recbox"><div class="rectitle">⏳ Đang phân tích...</div><div class="hint">Nhận diện giọng nói rồi AI tổng hợp. Máy yếu có thể mất 1–2 phút.</div></div>';
   const fd = new FormData(); fd.append("audio", f, f.name);
-  const base = (db.settings.aiBase || "").replace(/\/+$/, "");
+  const base = (db.settings.aiBase || ui.aiBase || "").replace(/\/+$/, "");
   const url = base ? base + "/api/transcribe" : "api/transcribe";
   try{
     const r = await fetch(url, {method:"POST", body:fd});
@@ -657,6 +657,7 @@ document.querySelectorAll(".bottomnav button").forEach(b=>{
 document.addEventListener("keydown", e=>{ if(e.key==="Escape") closeForm(); });
 
 render();
+fetch("config.json?t=" + Date.now()).then(r=> r.ok ? r.json() : null).then(c=>{ if(c && c.aiBase) ui.aiBase = c.aiBase; }).catch(()=>{});
 if(location.protocol==="https:" || location.hostname==="localhost" || location.hostname==="127.0.0.1"){
   checkDue(false);
   setInterval(()=> checkDue(false), 30000);
