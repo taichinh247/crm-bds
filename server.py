@@ -197,6 +197,11 @@ def run_chat_job(jid, message, history):
         r = subprocess.run(cmd, capture_output=True, text=True, timeout=180,
                            encoding="utf-8", errors="replace")
         out = (r.stdout or "").strip()
+        try:
+            with open(os.path.join(BASE, "chat_debug.log"), "a", encoding="utf-8") as dbg:
+                dbg.write("---- msg=%r len=%s\nOUT=%s\n" % (message[:80], len(prompt), out[:600]))
+        except OSError:
+            pass
         with JOBS_LOCK:
             JOBS[jid] = {"ok": True, "status": "done", "text": out or "(không có trả lời)"}
     except Exception as e:
