@@ -484,7 +484,7 @@ function msgEl(m){
   if(m.role==="ai"){
     const a=document.createElement("div"); a.className="acts";
     const b=document.createElement("button"); b.textContent="📌 Lưu ghi chép";
-    b.onclick=()=> saveNote(m.text);
+    b.onclick=()=> saveNote(d.querySelector(".mt").textContent);
     a.appendChild(b); d.appendChild(a);
   }
   return d;

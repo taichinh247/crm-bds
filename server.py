@@ -195,18 +195,30 @@ def run_chat_job(jid, message, history):
         if CHAT_MODEL:
             cmd += ["-m", CHAT_MODEL]
         cmd += ["-z", prompt]
+        env = {
+            "PATH": os.environ.get("PATH", ""),
+            "APPDATA": os.environ.get("APPDATA", ""),
+            "USERPROFILE": os.environ.get("USERPROFILE", ""),
+            "HERMES_HOME": os.environ.get("HERMES_HOME", r"D:\Hermes"),
+            "SystemRoot": os.environ.get("SystemRoot", r"C:\Windows"),
+            "SystemDrive": os.environ.get("SystemDrive", "C:"),
+            "ComSpec": os.environ.get("ComSpec", r"C:\Windows\System32\cmd.exe"),
+            "TEMP": os.environ.get("TEMP", r"C:\Users\Admin\AppData\Local\Temp"),
+            "TMP": os.environ.get("TMP", r"C:\Users\Admin\AppData\Local\Temp"),
+        }
         r = subprocess.run(cmd, capture_output=True, text=True, timeout=180,
-                           encoding="utf-8", errors="replace")
+                           encoding="utf-8", errors="replace", env=env, cwd=BASE)
         out = (r.stdout or "").strip()
         if len(out) < 120:
             r = subprocess.run(cmd, capture_output=True, text=True, timeout=180,
-                               encoding="utf-8", errors="replace")
+                               encoding="utf-8", errors="replace", env=env, cwd=BASE)
             out2 = (r.stdout or "").strip()
             if len(out2) > len(out):
                 out = out2
         try:
             with open(os.path.join(BASE, "chat_debug.log"), "a", encoding="utf-8") as dbg:
-                dbg.write("---- msg=%r len=%s\nOUT=%s\n" % (message[:80], len(prompt), out[:600]))
+                dbg.write("---- cmd=%r cwd=%s msg=%r len=%s tail=%r\nOUT=%s\n"
+                          % (cmd[:3], os.getcwd(), message[:50], len(prompt), prompt[-80:], out[:300]))
         except OSError:
             pass
         with JOBS_LOCK:
