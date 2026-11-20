@@ -179,6 +179,31 @@ def rule_analyze(text):
     }
 
 
+CHAT_PROMPT = """Bạn là trợ lý AI của CRM BĐS — app quản lý khách hàng bất động sản dành cho môi giới/nhân viên.
+Nhiệm vụ: hỗ trợ hỏi đáp, tư vấn cách chăm sóc khách, cách trả lời tin nhắn/zalo, gợi ý ghi chú và các bước tiếp theo.
+Trả lời bằng tiếng Việt, ngắn gọn, thực tế, có ví dụ cụ thể khi cần. Nếu hợp lý, đưa ra 2-4 bước cần làm.
+Lịch sử hội thoại gần nhất:
+---HISTORY---
+Câu hỏi mới: ---MESSAGE---"""
+
+
+def run_chat_job(jid, message, history):
+    prompt = CHAT_PROMPT.replace("---HISTORY---", history or "(chưa có)").replace("---MESSAGE---", message)
+    try:
+        cmd = [HERMES]
+        if AI_MODEL:
+            cmd += ["-m", AI_MODEL]
+        cmd += ["-z", prompt]
+        r = subprocess.run(cmd, capture_output=True, text=True, timeout=180,
+                           encoding="utf-8", errors="replace")
+        out = (r.stdout or "").strip()
+        with JOBS_LOCK:
+            JOBS[jid] = {"ok": True, "status": "done", "text": out or "(không có trả lời)"}
+    except Exception as e:
+        with JOBS_LOCK:
+            JOBS[jid] = {"ok": False, "status": "error", "error": str(e)}
+
+
 @app.after_request
 def cors(resp):
     resp.headers["Access-Control-Allow-Origin"] = "*"
@@ -225,6 +250,31 @@ def transcribe():
 
 @app.route("/api/transcribe/<jid>")
 def transcribe_status(jid):
+    with JOBS_LOCK:
+        j = JOBS.get(jid)
+    if not j:
+        return jsonify({"ok": False, "error": "khong thay job"}), 404
+    return jsonify(j)
+
+
+@app.route("/api/chat", methods=["POST", "OPTIONS"])
+def chat():
+    if request.method == "OPTIONS":
+        return "", 204
+    data = request.get_json(force=True, silent=True) or {}
+    message = str(data.get("message") or "").strip()
+    history = str(data.get("history") or "")
+    if not message:
+        return jsonify({"error": "trong"}), 400
+    jid = str(int(time.time() * 1000)) + str(random.randint(100, 999))
+    with JOBS_LOCK:
+        JOBS[jid] = {"ok": True, "status": "running"}
+    threading.Thread(target=run_chat_job, args=(jid, message, history), daemon=True).start()
+    return jsonify({"ok": True, "job": jid})
+
+
+@app.route("/api/chat/<jid>")
+def chat_status(jid):
     with JOBS_LOCK:
         j = JOBS.get(jid)
     if not j:

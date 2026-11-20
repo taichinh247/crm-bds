@@ -139,6 +139,19 @@ main{padding:12px 14px;max-width:720px;margin:0 auto}
 .aibanner .tx b{display:block;font-size:14.5px}
 .aibanner .tx span{font-size:12px;color:var(--muted)}
 .aibanner .arw{color:var(--accent);font-size:22px;font-weight:800}
+.chat{display:flex;flex-direction:column;gap:10px;margin-top:8px}
+.msg{max-width:86%;padding:10px 12px;border-radius:14px;font-size:14px;line-height:1.5;white-space:pre-wrap;word-break:break-word}
+.msg.user{align-self:flex-end;background:var(--accent);color:#fff;border-bottom-right-radius:4px}
+.msg.ai{align-self:flex-start;background:var(--card);border:1px solid var(--border);border-bottom-left-radius:4px}
+.msg .acts{margin-top:7px;display:flex;gap:6px}
+.msg .acts button{font-size:11.5px;padding:4px 9px;border-radius:8px;background:var(--card2);border:1px solid var(--border);color:var(--muted)}
+.chatbar{display:flex;gap:8px;margin-top:12px}
+.chatbar textarea{flex:1;min-height:46px;max-height:120px;border-radius:12px}
+.chatbar button{width:54px;border-radius:12px;background:var(--accent);color:#fff;font-size:20px;border:0}
+.notes{display:flex;flex-direction:column;gap:8px;margin-top:8px}
+.note{background:var(--card);border:1px solid var(--border);border-left:3px solid var(--accent2);border-radius:10px;padding:9px 11px;font-size:13px;white-space:pre-wrap}
+.note .nacts{margin-top:6px}
+.note .nacts button{font-size:11.5px;padding:3px 9px;border-radius:7px;background:var(--card2);border:1px solid var(--border);color:var(--muted)}
 </style>
 </head>
 <body>
@@ -171,6 +184,7 @@ main{padding:12px 14px;max-width:720px;margin:0 auto}
   <button data-tab="khach" class="on"><span class="ic">👥</span>Khách</button>
   <button data-tab="homnay"><span class="ic">⏰</span>Hôm nay<span class="badge-n hide" id="navDue">0</span></button>
   <button data-tab="cai-dat"><span class="ic">⚙️</span>Cài đặt</button>
+  <button data-tab="tro-ly"><span class="ic">💬</span>Trợ lý</button>
 </nav>
 
 <div class="sheet" id="sheet">
@@ -203,9 +217,9 @@ let ui = { tab:"khach", q:"", status:"all", editing:null, aiBase:"" };
 function load(){
   try{
     const d = JSON.parse(localStorage.getItem(KEY));
-    if(d && Array.isArray(d.leads)) return {leads:d.leads, settings:d.settings||{}, reminded:d.reminded||{}};
+    if(d && Array.isArray(d.leads)) return {leads:d.leads, settings:d.settings||{}, reminded:d.reminded||{}, notes:d.notes||[]};
   }catch(e){}
-  return {leads:[], settings:{notify:true}, reminded:{}};
+  return {leads:[], settings:{notify:true}, reminded:{}, notes:[]};
 }
 function save(){ localStorage.setItem(KEY, JSON.stringify(db)); }
 function uid(){ return Date.now().toString(36) + Math.random().toString(36).slice(2,7); }
@@ -266,6 +280,7 @@ function render(){
   const body = document.getElementById("listBody");
   body.innerHTML = "";
   if(ui.tab==="cai-dat"){ renderSettings(body); return; }
+  if(ui.tab==="tro-ly"){ renderAssistant(body); return; }
   const arr = filtered();
   if(!arr.length){
     body.innerHTML = '<div class="empty"><div class="big">📇</div>'+
@@ -457,6 +472,106 @@ function delLead(id){
   if(!confirm("Xoá khách này?")) return;
   db.leads = db.leads.filter(l=>l.id!==id);
   save(); closeForm(); render(); toast("Đã xoá");
+}
+
+/* ---------- trợ lý AI (hỏi đáp + ghi chép) ---------- */
+function loadChat(){ try{ return JSON.parse(localStorage.getItem("crm_chat_v1"))||[]; }catch(e){ return []; } }
+function saveChat(c){ try{ localStorage.setItem("crm_chat_v1", JSON.stringify(c.slice(-100))); }catch(e){} }
+function msgEl(m){
+  const d=document.createElement("div");
+  d.className="msg "+m.role;
+  const t=document.createElement("div"); t.className="mt"; t.textContent=m.text; d.appendChild(t);
+  if(m.role==="ai"){
+    const a=document.createElement("div"); a.className="acts";
+    const b=document.createElement("button"); b.textContent="📌 Lưu ghi chép";
+    b.onclick=()=> saveNote(m.text);
+    a.appendChild(b); d.appendChild(a);
+  }
+  return d;
+}
+function renderAssistant(body){
+  const wrap=document.createElement("div");
+  wrap.innerHTML =
+    '<div class="sec-title">Trợ lý AI — hỏi đáp & ghi chép</div>'+
+    '<div class="chat" id="chatBox"></div>'+
+    '<div class="chatbar"><textarea id="chatInput" placeholder="Hỏi gì về khách, cách trả lời, ghi chép..."></textarea>'+
+    '<button id="chatSend">➤</button></div>'+
+    '<div style="display:flex;justify-content:space-between;align-items:center;margin-top:16px">'+
+      '<div class="sec-title" style="margin:0">Ghi chép AI</div>'+
+      '<button class="btn ghost" id="chatClear" style="padding:7px 11px;font-size:12px">Xoá hội thoại</button></div>'+
+    '<div class="notes" id="notesBox"></div>';
+  body.appendChild(wrap);
+  const box=wrap.querySelector("#chatBox");
+  const chat=loadChat();
+  if(!chat.length){
+    box.innerHTML='<div class="empty"><div class="big">💬</div>Hỏi tôi bất cứ điều gì.<br>Ví dụ: "Cách trả lời khách băn khoăn về giá"</div>';
+  } else {
+    chat.forEach(m=> box.appendChild(msgEl(m)));
+  }
+  box.scrollTop=box.scrollHeight;
+  wrap.querySelector("#chatSend").onclick=sendChat;
+  wrap.querySelector("#chatInput").addEventListener("keydown", e=>{ if(e.key==="Enter" && !e.shiftKey){ e.preventDefault(); sendChat(); } });
+  wrap.querySelector("#chatClear").onclick=()=>{ if(confirm("Xoá hết hội thoại?")){ localStorage.removeItem("crm_chat_v1"); render(); } };
+  renderNotes(wrap.querySelector("#notesBox"));
+}
+async function sendChat(){
+  const ta=document.getElementById("chatInput");
+  const text=(ta.value||"").trim(); if(!text) return;
+  const chat=loadChat(); chat.push({role:"user", text}); saveChat(chat);
+  ta.value="";
+  const box=document.getElementById("chatBox");
+  box.innerHTML=""; chat.forEach(m=> box.appendChild(msgEl(m)));
+  const thinking=msgEl({role:"ai", text:"⏳ Đang nghĩ..."}); box.appendChild(thinking);
+  box.scrollTop=box.scrollHeight;
+  const hist=chat.slice(-6).map(x=>(x.role==="user"?"Khách: ":"Trợ lý: ")+x.text).join("\n");
+  try{
+    const base=(db.settings.aiBase||ui.aiBase||"").replace(/\/+$/,"");
+    const url= base? base+"/api/chat" : "api/chat";
+    const r=await fetch(url,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({message:text,history:hist})});
+    const d=await r.json();
+    if(!d.ok && d.error) throw new Error(d.error);
+    await pollChat(d.job, base, box, thinking);
+  }catch(e){
+    const t=thinking.querySelector(".mt"); if(t) t.textContent="⚠️ Không gọi được trợ lý (máy tính chưa bật?). "+e.message;
+  }
+}
+async function pollChat(jid, base, box, thinking){
+  const statusUrl= base? base+"/api/chat/" : "api/chat/";
+  const mt=()=> thinking.querySelector(".mt");
+  for(let i=0;i<80;i++){
+    await new Promise(r=> setTimeout(r, 4000));
+    try{
+      const r=await fetch(statusUrl+jid); const d=await r.json();
+      if(d.status==="error"){ if(mt()) mt().textContent="⚠️ "+d.error; return; }
+      if(d.status==="done"){
+        const txt=d.text||"(không có trả lời)";
+        if(mt()) mt().textContent=txt;
+        const chat=loadChat(); chat.push({role:"ai", text:txt}); saveChat(chat);
+        return;
+      }
+    }catch(e){}
+  }
+  if(mt()) mt().textContent="⚠️ Hết giờ chờ.";
+}
+function saveNote(text){
+  db.notes=db.notes||[];
+  db.notes.unshift({id:uid(), text, at:nowIso()});
+  save(); toast("Đã lưu ghi chép");
+  const nb=document.getElementById("notesBox"); if(nb) renderNotes(nb);
+}
+function renderNotes(box){
+  if(!box) return;
+  const notes=db.notes||[];
+  box.innerHTML="";
+  if(!notes.length){ box.innerHTML='<div class="hint">Chưa có ghi chép. Bấm "📌 Lưu ghi chép" ở câu trả lời để lưu.</div>'; return; }
+  notes.forEach(n=>{
+    const d=document.createElement("div"); d.className="note";
+    const t=document.createElement("div"); t.textContent=n.text; d.appendChild(t);
+    const a=document.createElement("div"); a.className="nacts";
+    const b=document.createElement("button"); b.textContent="Xoá";
+    b.onclick=()=>{ db.notes=(db.notes||[]).filter(x=>x.id!==n.id); save(); renderNotes(box); };
+    a.appendChild(b); d.appendChild(a); box.appendChild(d);
+  });
 }
 
 /* ---------- ghi âm + AI ---------- */
