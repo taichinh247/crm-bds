@@ -11,6 +11,7 @@ MODEL = os.environ.get("CRM_WHISPER_MODEL", "small")
 HERMES = os.environ.get("CRM_HERMES_CMD") or shutil.which("hermes") or \
          r"D:\Hermes\hermes-agent\apps\desktop\release\win-unpacked\resources\agent-payload\bin\hermes.exe"
 AI_MODEL = os.environ.get("CRM_HERMES_MODEL", "glm-5.3-flash")
+CHAT_MODEL = os.environ.get("CRM_CHAT_MODEL", "llama-3.3-70b-versatile")
 
 app = Flask(__name__, static_folder=BASE, static_url_path="")
 app.config["MAX_CONTENT_LENGTH"] = 200 * 1024 * 1024
@@ -191,12 +192,18 @@ def run_chat_job(jid, message, history):
     prompt = CHAT_PROMPT.replace("---HISTORY---", history or "(chưa có)").replace("---MESSAGE---", message)
     try:
         cmd = [HERMES]
-        if AI_MODEL:
-            cmd += ["-m", AI_MODEL]
+        if CHAT_MODEL:
+            cmd += ["-m", CHAT_MODEL]
         cmd += ["-z", prompt]
         r = subprocess.run(cmd, capture_output=True, text=True, timeout=180,
                            encoding="utf-8", errors="replace")
         out = (r.stdout or "").strip()
+        if len(out) < 120:
+            r = subprocess.run(cmd, capture_output=True, text=True, timeout=180,
+                               encoding="utf-8", errors="replace")
+            out2 = (r.stdout or "").strip()
+            if len(out2) > len(out):
+                out = out2
         try:
             with open(os.path.join(BASE, "chat_debug.log"), "a", encoding="utf-8") as dbg:
                 dbg.write("---- msg=%r len=%s\nOUT=%s\n" % (message[:80], len(prompt), out[:600]))
@@ -288,5 +295,12 @@ def chat_status(jid):
 
 
 if __name__ == "__main__":
+    try:
+        with open(os.path.join(BASE, "env_debug.log"), "w", encoding="utf-8") as f:
+            for k in ["APPDATA", "HOME", "USERPROFILE", "HERMES_HOME", "HERMES_PROFILE",
+                      "HERMES_INFERENCE_MODEL", "HERMES_MODEL", "HERMES_PROVIDER", "PATH"]:
+                f.write("%s=%s\n" % (k, os.environ.get(k)))
+    except OSError:
+        pass
     print("[crm] serving %s on http://127.0.0.1:8080 (model=%s)" % (BASE, MODEL), flush=True)
     app.run(host="127.0.0.1", port=8080, threaded=True, debug=False)
